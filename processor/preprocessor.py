@@ -1,4 +1,5 @@
 import awkward as ak
+import numpy as np
 from coffea.processor import ProcessorABC
 from coffea.nanoevents.methods import candidate
 
@@ -10,7 +11,42 @@ class PreProcessor(ProcessorABC):
     """
 
     def __init__(self):
-        pass
+
+        # Define the full list of gen-level variables to keep in the output ntuple.
+        # This serves as the output schema and ensures a consistent set of columns
+        # across all sample types (W+, W-, Z, QCD). If a variable is not applicable
+        # to a given sample (e.g. fj_isZ_2q for a QCD sample), it will be
+        # automatically zero-filled in the process() method, so all output files
+        # have the same structure and can be merged for training.
+
+        self.GenPartvars = [
+            "fj_genjetmass",
+            # W boson (hadronic)
+            "fj_isWplus",
+            "fj_isWplus_Matched",
+            "fj_isWplus_2q",
+            "fj_Wplus_nprongs",
+            "fj_Wplus_ncquarks",
+            "fj_isWminus",
+            "fj_isWminus_Matched",
+            "fj_isWminus_2q",
+            "fj_Wminus_nprongs",
+            "fj_Wminus_ncquarks",
+            # Z boson (hadronic)
+            "fj_isZ",
+            "fj_isZ_Matched",
+            "fj_isZ_2q",
+            "fj_Z_nprongs",
+            "fj_Z_ncquarks",
+            # QCD
+            "fj_isQCD",
+            "fj_isQCD_Matched",
+            "fj_isQCDb",
+            "fj_isQCDbb",
+            "fj_isQCDc",
+            "fj_isQCDcc",
+            "fj_isQCDothers",
+        ]
 
     @property
     def accumulator(self):
@@ -81,11 +117,32 @@ class PreProcessor(ProcessorABC):
 
         ###### =========== Gen-level matching ===========
         genparts = events.GenPart
+        GenVars = {}
 
         if "Wto2Q" in dataset:
             wplus_genvars, _ = match_Wplus(genparts, candidatefj)
             wminus_genvars, _ = match_Wminus(genparts, candidatefj)
+            GenVars = {**wplus_genvars, **wminus_genvars}
         elif "Zto2Q" in dataset:
             z_genvars, _ = match_Z(genparts, candidatefj)
+            GenVars = {**z_genvars}
         elif "QCD" in dataset:
             qcd_genvars, _ = match_QCD(genparts, candidatefj)
+            GenVars = {**qcd_genvars}
+
+        AllGenVars = {
+            **GenVars,
+            **{"fj_genjetmass": candidatefj.matched_gen.mass},
+        }
+
+        # Fill missing variables with zeros if not applicable to this sample
+        GenVars = {
+            key: AllGenVars[key] if key in AllGenVars else np.zeros(len(genparts))
+            for key in self.GenPartvars
+        }
+
+        for key in GenVars:
+            try:
+                GenVars[key] = GenVars[key].to_numpy()
+            except Exception:
+                continue
